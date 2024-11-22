@@ -21,9 +21,9 @@ def start_ble_process():
     ble_process.start()
     print("BLE process started.")
     
-    plot_process = mp.Process(target=live_plot, args=(phi_queue, theta_queue))
-    plot_process.start()
-    print("Plot process started.")
+    # plot_process = mp.Process(target=live_plot, args=(phi_queue, theta_queue))
+    # plot_process.start()
+    # print("Plot process started.")
 
 def stop_processes():
     """Terminate both processes and wait for them to finish."""
@@ -47,7 +47,6 @@ def on_press(key):
         if key.char == 'q':
             print("'q' key pressed. Terminating BLE process...")
             stop_processes()
-            
             return False  # Stop the listener
     except AttributeError:
         pass  # Ignore special keys
@@ -60,7 +59,7 @@ theta_queue = mp.Queue()
 # Function to update the plot
 def live_plot(phi_queue, theta_queue):
     plt.ion()  # Turn on interactive mode
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(5, 4))
     x_data, phi_data, theta_data = [], [], []
     line1, = ax1.plot(x_data, phi_data, label="Roll (Phi)", color="blue")
     line2, = ax2.plot(x_data, theta_data, label="Pitch (Theta)", color="red")

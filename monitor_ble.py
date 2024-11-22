@@ -79,7 +79,7 @@ characteristic = "19B10013-E8F2-537E-4F6C-D104768A1214"
 
 sleep_time = 0.01
 
-# Initialise matrices and variables
+# Initialize matrices and variables
 C = np.array([[1, 0, 0, 0], [0, 0, 1, 0]])
 P = np.eye(4)
 Q = np.eye(4)
@@ -211,11 +211,13 @@ async def monitor_ble_async(data_queue: mp.Queue, command_queue: mp.Queue):
             A = np.array([[1, -dt, 0, 0], [0, 1, 0, 0], [0, 0, 1, -dt], [0, 0, 0, 1]])
             B = np.array([[dt, 0], [0, 0], [0, dt], [0, 0]])
 
-            gyro_input = np.array([[phi_dot], [theta_dot]])
+            gyro_input = np.array([[phi_dot], [theta_dot]]) # f function
             state_estimate = A.dot(state_estimate) + B.dot(gyro_input)
+            # TODO: A Jacobian, so that state_estimate updates, remove B
             P = A.dot(P.dot(np.transpose(A))) + Q
 
             measurement = np.array([[phi_acc], [theta_acc]])
+            # TODO: C Jacobian of h, with respect of x
             y_tilde = measurement - C.dot(state_estimate)
             S = R + C.dot(P.dot(np.transpose(C)))
             K = P.dot(np.transpose(C).dot(np.linalg.inv(S)))
