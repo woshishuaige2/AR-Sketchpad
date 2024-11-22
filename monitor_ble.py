@@ -9,6 +9,8 @@ from time import sleep, time
 
 import numpy as np
 
+from multiprocessing import Queue
+import matplotlib.pyplot as plt
 
 class StylusReading(NamedTuple):
     accel: np.ndarray
@@ -108,7 +110,63 @@ sleep(2)
 dt = 0.0
 start_time = time()
 
-async def monitor_ble_async(data_queue: mp.Queue, command_queue: mp.Queue):
+# Initialize data queues
+phi_queue = Queue()
+theta_queue = Queue()
+
+# Function to update the plot
+def live_plot(phi_queue, theta_queue):
+    plt.ion()  # Turn on interactive mode
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+    x_data, phi_data, theta_data = [], [], []
+    line1, = ax1.plot(x_data, phi_data, label="Phi (degrees)", color="blue")
+    line2, = ax2.plot(x_data, theta_data, label="Theta (degrees)", color="red")
+    
+    ax1.set_title("Phi (Roll Angle) vs Time")
+    ax1.set_ylabel("Phi (degrees)")
+    ax1.legend()
+    ax1.grid(True)
+    
+    ax2.set_title("Theta (Pitch Angle) vs Time")
+    ax2.set_xlabel("Time (s)")
+    ax2.set_ylabel("Theta (degrees)")
+    ax2.legend()
+    ax2.grid(True)
+    
+    start_time = time()
+    
+    while True:
+        try:
+            current_time = time() - start_time
+            if not phi_queue.empty() and not theta_queue.empty():
+                phi = phi_queue.get()
+                theta = theta_queue.get()
+                
+                x_data.append(current_time)
+                phi_data.append(phi)
+                theta_data.append(theta)
+                
+                line1.set_xdata(x_data)
+                line1.set_ydata(phi_data)
+                line2.set_xdata(x_data)
+                line2.set_ydata(theta_data)
+                
+                ax1.set_xlim(0, max(current_time, 10))
+                ax2.set_xlim(0, max(current_time, 10))
+                
+                ax1.set_ylim(min(phi_data)-5, max(phi_data)+5)
+                ax2.set_ylim(min(theta_data)-5, max(theta_data)+5)
+                
+                plt.pause(0.01)
+        except KeyboardInterrupt:
+            print("Stopping live plot...")
+            break
+
+async def monitor_ble_async(data_queue: mp.Queue, command_queue: mp.Queue):    
+    from multiprocessing import Process
+
+    plot_process = Process(target=live_plot, args=(phi_queue, theta_queue))
+    plot_process.start()
     while True:
         device = await BleakScanner.find_device_by_name("DPOINT", timeout=5)
         if device is None:
@@ -166,9 +224,16 @@ async def monitor_ble_async(data_queue: mp.Queue, command_queue: mp.Queue):
 
             phi_hat = state_estimate[0]
             theta_hat = state_estimate[2]
+            
+            phi_degrees = np.round(phi_hat * 180.0 / math.pi, 2)
+            theta_degrees = np.round(theta_hat * 180.0 / math.pi, 2)
+            
+            # Enqueue the data for plotting
+            phi_queue.put(phi_degrees)
+            theta_queue.put(theta_degrees)
 
             # Display results
-            print("Phi: " + str(np.round(phi_hat * 180.0 / math.pi, 1)) + " Theta: " + str(np.round(theta_hat * 180.0 / math.pi, 1)))
+            print("Phi: " + str(phi_degrees) + " Theta: " + str(theta_degrees))
 
             sleep(sleep_time)
 
@@ -188,6 +253,8 @@ async def monitor_ble_async(data_queue: mp.Queue, command_queue: mp.Queue):
                     [disconnected_task, command], return_when=asyncio.FIRST_COMPLETED
                 )
                 if command.done():
+                    plot_process.terminate()
+                    plot_process.join()
                     print("Quitting BLE process")
                     return
                 print("Disconnected from BLE")
