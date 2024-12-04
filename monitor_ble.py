@@ -73,7 +73,7 @@ sleep_time = 0.01
 C = np.array([[1, 0, 0, 0], [0, 0, 1, 0]])
 P = np.eye(4)
 Q = np.eye(4)
-R = np.eye(3)
+R = np.eye(2)
 
 state_estimate = np.array([[0], [0], [0], [0]]) # [phi_hat, phi_dot, theta_hat, theta_dot]
 
@@ -111,9 +111,6 @@ async def monitor_ble_async(data_queue: mp.Queue, command_queue: mp.Queue, phi_q
         
         def queue_notification_handler(_: BleakGATTCharacteristic, data: bytearray):
             reading = unpack_imu_data_packet(data)
-            #print("reading.accel: " + str(reading.accel))
-            #print("reading.gyro: " + str(reading.gyro))
-            #print("reading.pressure: " + str(reading.pressure))
             data_queue.put(reading)
 
             # Sampling time
@@ -130,86 +127,49 @@ async def monitor_ble_async(data_queue: mp.Queue, command_queue: mp.Queue, phi_q
             ax = reading.accel[0]
             ay = reading.accel[1]
             az = reading.accel[2]
-            gx = reading.gyro[0]
-            gy = reading.gyro[1]
-            gz = reading.gyro[2]
+            p = reading.gyro[0]
+            q = reading.gyro[1]
+            r = reading.gyro[2]
             # Get accelerometer measurements and remove offsets
             [phi_acc, theta_acc] = [math.atan2(ay, math.sqrt(ax ** 2.0 + az ** 2.0)), math.atan2(-ax, math.sqrt(ay ** 2.0 + az ** 2.0))] 
             phi_acc -= phi_offset
             theta_acc -= theta_offset
             
             # Get gyro measurements and calculate Euler angle derivatives gx, gy, gz
-            [p, q, r] = [gx, gy, gz]
             phi_dot = p + math.sin(phi_hat) * math.tan(theta_hat) * q + math.cos(phi_hat) * math.tan(theta_hat) * r
             theta_dot = math.cos(phi_hat) * q - math.sin(phi_hat) * r
 
             # Kalman filter
             A = np.array([[1, -dt, 0, 0], [0, 1, 0, 0], [0, 0, 1, -dt], [0, 0, 0, 1]])
-            #B = np.array([[dt, 0], [0, 0], [0, dt], [0, 0]])
+            B = np.array([[dt, 0], [0, 0], [0, dt], [0, 0]])
 
-            #gyro_input = np.array([[phi_dot], [theta_dot]]) # f function
-            state_estimate = A.dot(state_estimate)
-            state_estimate[1, 0] = phi_dot  # Update roll rate
-            state_estimate[3, 0] = theta_dot  # Update pitch rate
-            # gyro_input_Jacobian = np.array([
-            #     [math.cos(phi_hat) * math.tan(theta_hat) * q - math.sin(phi_hat) * math.tan(theta_hat) * r, math.sin(phi_hat) * (1/math.cos(theta_hat)) ** 2 * q + math.cos(phi_hat) * (1/math.cos(theta_hat)) ** 2 * r], 
-            #     [-math.sin(phi_hat) * q - math.cos(phi_hat) * r, 0]])
-            # P = P + A.dot(gyro_input_Jacobian.dot(P) + P.dot(np.transpose(gyro_input_Jacobian)) + Q)
+            gyro_input = np.array([[phi_dot], [theta_dot]])
+            state_estimate = A.dot(state_estimate) + B.dot(gyro_input)
             P = A.dot(P.dot(np.transpose(A))) + Q
 
-            #START
-            # Measurement prediction
-            g = 9.80665
-            h_acc = g * np.array([math.sin(theta_hat), -math.cos(theta_hat) * math.sin(phi_hat), -math.cos(theta_hat) * math.cos(phi_hat)]) # + sensor noise
-            # Measurement Jacobian
-            h_Jacobian = np.array([[0, g * math.cos(theta_hat)],
-                                   [-g * math.cos(theta_hat) * math.cos(phi_hat), g * math.sin(theta_hat) * math.sin(phi_hat)],
-                                   [g * math.cos(theta_hat) * math.sin(phi_hat), g * math.sin(theta_hat) * math.cos(phi_hat)]])
-            # Kalman gain
-            K = P.dot(np.transpose(h_Jacobian)).dot(np.linalg.inv(h_Jacobian.dot(P).dot(np.transpose(h_Jacobian)) + R))
-            measurement = np.array([ax, ay, az])
-            y = measurement - h_acc.reshape(-1,1)
-            state_estimate = state_estimate + K.dot(y)
-            
-            # Covariance update
-            state_dim = state_estimate.shape[0]
-            I = np.identity(state_dim)
-            P = (I - K.dot(h_Jacobian)).dot(P)
-            
-            phi_hat = state_estimate[0, 0]
-            theta_hat = state_estimate[2, 0]
+            measurement = np.array([[phi_acc], [theta_acc]])
+            y_tilde = measurement - C.dot(state_estimate)
+            S = R + C.dot(P.dot(np.transpose(C)))
+            K = P.dot(np.transpose(C).dot(np.linalg.inv(S)))
+            state_estimate = state_estimate + K.dot(y_tilde)
+            P = (np.eye(4) - K.dot(C)).dot(P)
+
+            phi_hat = state_estimate[0]
+            theta_hat = state_estimate[2]
             
             phi_degrees = np.round(phi_hat * 180.0 / math.pi, 2)
             theta_degrees = np.round(theta_hat * 180.0 / math.pi, 2)
-                
+            
+            # Enqueue the data for plotting
+            if counter%2 == 0:
+                phi_queue.put(phi_degrees)
+                theta_queue.put(theta_degrees)
+            counter += 1
+
             # Display results
             print("Phi: " + str(phi_degrees) + " Theta: " + str(theta_degrees))
-            
-            
-            # measurement = np.array([[phi_acc], [theta_acc]])
-            # # TODO: C Jacobian of h, with respect of x
-            # y_tilde = measurement - C.dot(state_estimate)
-            # S = R + C.dot(P.dot(np.transpose(C)))
-            # K = P.dot(np.transpose(C).dot(np.linalg.inv(S)))
-            # state_estimate = state_estimate + K.dot(y_tilde)
-            # P = (np.eye(4) - K.dot(C)).dot(P)
 
-            # phi_hat = state_estimate[0]
-            # theta_hat = state_estimate[2]
-            
-            # phi_degrees = np.round(phi_hat * 180.0 / math.pi, 2)
-            # theta_degrees = np.round(theta_hat * 180.0 / math.pi, 2)
-            
-            # # Enqueue the data for plotting
-            # if counter%2 == 0:
-            #     phi_queue.put(phi_degrees)
-            #     theta_queue.put(theta_degrees)
-            # counter += 1
-
-            # # Display results
-            # print("Phi: " + str(phi_degrees) + " Theta: " + str(theta_degrees))
-
-            # sleep(sleep_time)
+            sleep(sleep_time)
 
         disconnected_event = asyncio.Event()
         print("Connecting to BLE device...")

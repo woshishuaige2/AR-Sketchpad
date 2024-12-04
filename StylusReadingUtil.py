@@ -26,7 +26,7 @@ def start_ble_process():
     print("BLE process started.")
     
     plot_process = mp.Process(target=live_plot, args=(phi_queue, theta_queue))
-    # plot_process.start()
+    plot_process.start()
     print("Plot process started.")
 
 def stop_processes():
